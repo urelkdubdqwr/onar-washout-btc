@@ -1,11 +1,11 @@
 import { runBars, type BarsState, type Batch, type OrderInput } from './vendor/makefun-bars.ts';
 
 export const SYMBOL = 'CBBTC';
-export const WASHOUT_WINDOW = 180;
+export const WASHOUT_WINDOW = 120;
 export const WASHOUT_DEPTH = 0.03;
-export const BOUNCE_CONFIRM = 0.0008;
-export const TAKE_PROFIT = 0.01;
-export const STOP_LOSS = 0.008;
+export const BOUNCE_CONFIRM = 0.0025;
+export const TAKE_PROFIT = 0.04;
+export const STOP_LOSS = 0.05;
 export const MAX_HOLD = 720;
 export const MAX_SLIPPAGE_BPS = 100;
 export const FALLBACK_SEQ = 1200;
@@ -14,6 +14,9 @@ export const FALLBACK_SEQ = 1200;
 let closes: bigint[] = [];
 let holdBars = 0;
 let everBought = false;
+
+/** A fractional constant as integer basis points (10000 bps = 100%), for bigint comparisons. */
+const bps = (f: number) => BigInt(Math.round(f * 10_000));
 
 /** Deep-washout-then-bounce entry, checked against the 180 closes ending at the previous bar. */
 function washoutAndBounceEntered(): boolean {
@@ -26,9 +29,9 @@ function washoutAndBounceEntered(): boolean {
     if (c > high) high = c;
   }
   // latest at most 3% below the window high: latest <= high * (1 - 0.03)
-  const withinDepth = latest * 10_000n <= high * 9_700n;
+  const withinDepth = latest * 10_000n <= high * (10_000n - bps(WASHOUT_DEPTH));
   // more than 0.08% above the previous close: latest > prev * (1 + 0.0008)
-  const bounced = latest * 10_000n > prev * 10_008n;
+  const bounced = latest * 10_000n > prev * (10_000n + bps(BOUNCE_CONFIRM));
   return withinDepth && bounced;
 }
 
@@ -47,8 +50,8 @@ function onBatch(state: BarsState, batch: Batch): OrderInput[] {
     holdBars++;
     const value = state.value(SYMBOL, held.qty);
     const cost = held.cost;
-    const takeProfit = value * 100n >= cost * 101n;
-    const stopLossHit = value * 1000n <= cost * 992n;
+    const takeProfit = value * 10_000n >= cost * (10_000n + bps(TAKE_PROFIT));
+    const stopLossHit = value * 10_000n <= cost * (10_000n - bps(STOP_LOSS));
     const timedOut = holdBars >= MAX_HOLD;
     if (takeProfit || stopLossHit || timedOut) {
       return [{ side: 'sell', symbol: SYMBOL, qty: held.qty, max_slippage_bps: MAX_SLIPPAGE_BPS }];
